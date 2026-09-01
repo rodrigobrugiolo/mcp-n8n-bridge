@@ -6,6 +6,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 const app = express();
 app.use(express.json());
 
+// Evita timeout do gateway e buffer
 app.use((req, res, next) => {
   res.setHeader('X-Accel-Buffering', 'no');
   next();
@@ -68,7 +69,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 let transport;
 
-app.get('/sse', async (req, res) => {
+// Rota unificada que aceita tanto GET (para abrir o SSE) quanto POST (para mensagens)
+app.all('/sse', async (req, res) => {
   const authHeader = req.headers.authorization;
   const myToken = process.env.MCP_AUTH_TOKEN;
   
@@ -80,10 +82,18 @@ app.get('/sse', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  transport = new SSEServerTransport('/messages', res);
+  if (req.method === 'POST') {
+    if (transport) {
+      return await transport.handlePostMessage(req, res);
+    }
+    return res.status(400).send('Transporte não inicializado');
+  }
+
+  transport = new SSEServerTransport('/sse', res);
   await server.connect(transport);
 });
 
+// Mantém a rota /messages de suporte caso o SaaS envie para ela
 app.post('/messages', async (req, res) => {
   if (transport) {
     await transport.handlePostMessage(req, res);
